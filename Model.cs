@@ -163,6 +163,7 @@ internal sealed class SheetInfo
     public readonly List<MergedRange> Merged = new();
     public readonly List<ColorScaleRule> ColorScales = new();
     public readonly Dictionary<(int Row, int Col), uint> ConditionalFills = new();
+    public readonly List<SheetImage> Images = new();
     public readonly Dictionary<int, RowInfo> Rows = new();
     public readonly Dictionary<int, ColInfo> Cols = new();
     public double DefaultRowHeightPt = 15;
@@ -174,6 +175,45 @@ internal sealed class SheetInfo
 
     public bool IsEmpty => MinRow == int.MaxValue || MaxRow < MinRow || MaxCol < MinCol;
 }
+
+internal enum ImageAnchorKind
+{
+    TwoCell,
+    OneCell,
+    Absolute,
+}
+
+internal sealed class SheetImage
+{
+    public byte[] Data = Array.Empty<byte>();
+    public ImageAnchorKind Anchor = ImageAnchorKind.TwoCell;
+
+    public int FromRow = 1;
+    public int FromCol = 1;
+    public long FromColOffset;
+    public long FromRowOffset;
+
+    public int ToRow = 1;
+    public int ToCol = 1;
+    public long ToColOffset;
+    public long ToRowOffset;
+
+    public long ExtCx;
+    public long ExtCy;
+    public long PosX;
+    public long PosY;
+
+    public double RotationDegrees;
+    public bool FlipHorizontal;
+    public bool FlipVertical;
+
+    // 图片裁剪比例（0 - 1）
+    public double CropLeft;
+    public double CropTop;
+    public double CropRight;
+    public double CropBottom;
+}
+
 
 internal sealed class ColorScaleStop
 {

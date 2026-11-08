@@ -11,6 +11,7 @@ internal static class XlsxReader
     private static readonly XNamespace R = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
     private static readonly XNamespace PR = "http://schemas.openxmlformats.org/package/2006/relationships";
     private static readonly XNamespace A = "http://schemas.openxmlformats.org/drawingml/2006/main";
+    private static readonly XNamespace XDR = "http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing";
 
     private static readonly uint[] IndexedPalette =
     {
@@ -56,7 +57,7 @@ internal static class XlsxReader
             var workbookPr = workbookDoc.Root?.Element(M + "workbookPr");
             workbook.Date1904 = IsTrue(workbookPr?.Attribute("date1904")?.Value);
 
-            var relationships = ReadRelationships(zip);
+            var relationships = ReadRelationships(zip, "xl/_rels/workbook.xml.rels");
             var sheetsElement = workbookDoc.Root?.Element(M + "sheets");
             if (sheetsElement != null)
             {
@@ -64,7 +65,7 @@ internal static class XlsxReader
                 {
                     var name = sheetElement.Attribute("name")?.Value ?? "Sheet";
                     var relId = sheetElement.Attribute(R + "id")?.Value;
-                    if (relId == null || !relationships.TryGetValue(relId, out var target))
+                    if (relId == null || !relationships.TryGetValue(relId, out var relationship))
                     {
                         continue;
                     }
@@ -73,7 +74,7 @@ internal static class XlsxReader
                     workbook.Sheets.Add(new SheetMeta
                     {
                         Name = name,
-                        Target = NormalizeTarget(target),
+                        Target = NormalizeTarget(relationship.Target),
                         Hidden = !string.Equals(state, "visible", StringComparison.OrdinalIgnoreCase),
                     });
                 }
@@ -573,8 +574,212 @@ internal static class XlsxReader
 
         ReadConditionalFormatting(root, workbook, sheet);
         ApplyColorScales(sheet);
+        ReadImages(zip, sheet, meta.Target);
 
         return sheet;
+    }
+
+    private static void ReadImages(ZipArchive zip, SheetInfo sheet, string sheetPartPath)
+    {
+        var sheetRelationships = ReadRelationships(zip, GetRelationshipsPath(sheetPartPath));
+        foreach (var relationship in sheetRelationships.Values)
+        {
+            if (relationship.External
+                || !relationship.Type.EndsWith("/drawing", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            var drawingPath = ResolvePartPath(sheetPartPath, relationship.Target);
+            ReadDrawingImages(zip, sheet, drawingPath);
+        }
+    }
+
+    private static void ReadDrawingImages(ZipArchive zip, SheetInfo sheet, string drawingPath)
+    {
+        var drawingEntry = FindEntry(zip, drawingPath);
+        if (drawingEntry == null)
+        {
+            return;
+        }
+
+        var drawingRelationships = ReadRelationships(zip, GetRelationshipsPath(drawingPath));
+        var root = LoadXml(drawingEntry).Root;
+        if (root == null)
+        {
+            return;
+        }
+
+        foreach (var anchor in root.Elements())
+        {
+            ImageAnchorKind anchorKind;
+            switch (anchor.Name.LocalName)
+            {
+                case "twoCellAnchor":
+                    anchorKind = ImageAnchorKind.TwoCell;
+                    break;
+                case "oneCellAnchor":
+                    anchorKind = ImageAnchorKind.OneCell;
+                    break;
+                case "absoluteAnchor":
+                    anchorKind = ImageAnchorKind.Absolute;
+                    break;
+                default:
+                    continue;
+            }
+
+            foreach (var picture in anchor.Elements(XDR + "pic"))
+            {
+                var image = CreateSheetImage(picture, anchor, anchorKind, drawingRelationships, zip, drawingPath);
+                if (image == null)
+                {
+                    continue;
+                }
+
+                sheet.Images.Add(image);
+                if (image.Anchor != ImageAnchorKind.Absolute)
+                {
+                    UpdateBounds(sheet, image.FromRow, image.FromCol);
+                    if (image.Anchor == ImageAnchorKind.TwoCell)
+                    {
+                        UpdateBounds(sheet, image.ToRow, image.ToCol);
+                    }
+                }
+            }
+        }
+    }
+
+    private static SheetImage? CreateSheetImage(
+        XElement picture,
+        XElement anchor,
+        ImageAnchorKind anchorKind,
+        Dictionary<string, RelationshipInfo> relationships,
+        ZipArchive zip,
+        string drawingPath)
+    {
+        var blip = picture.Descendants(A + "blip").FirstOrDefault();
+        var embedId = blip?.Attribute(R + "embed")?.Value;
+        if (string.IsNullOrEmpty(embedId)
+            || !relationships.TryGetValue(embedId, out var imageRelationship)
+            || imageRelationship.External)
+        {
+            return null;
+        }
+
+        var mediaPath = ResolvePartPath(drawingPath, imageRelationship.Target);
+        var mediaEntry = FindEntry(zip, mediaPath);
+        if (mediaEntry == null)
+        {
+            return null;
+        }
+
+        byte[] data;
+        using (var stream = mediaEntry.Open())
+        using (var memory = new MemoryStream())
+        {
+            stream.CopyTo(memory);
+            data = memory.ToArray();
+        }
+
+        var image = new SheetImage
+        {
+            Data = data,
+            Anchor = anchorKind,
+        };
+
+        var fromMarker = anchor.Element(XDR + "from");
+        var toMarker = anchor.Element(XDR + "to");
+        var hasFrom = TryReadMarker(fromMarker, out var fromRow, out var fromCol, out var fromColOffset, out var fromRowOffset);
+        var hasTo = TryReadMarker(toMarker, out var toRow, out var toCol, out var toColOffset, out var toRowOffset);
+
+        var xfrm = picture.Element(XDR + "spPr")?.Element(A + "xfrm");
+        var offset = xfrm?.Element(A + "off");
+        var extent = anchor.Element(XDR + "ext") ?? xfrm?.Element(A + "ext");
+        var position = anchor.Element(XDR + "pos");
+
+        if (anchorKind == ImageAnchorKind.TwoCell && hasFrom && hasTo)
+        {
+            image.FromRow = fromRow;
+            image.FromCol = fromCol;
+            image.FromColOffset = fromColOffset;
+            image.FromRowOffset = fromRowOffset;
+            image.ToRow = toRow;
+            image.ToCol = toCol;
+            image.ToColOffset = toColOffset;
+            image.ToRowOffset = toRowOffset;
+        }
+        else if (hasFrom)
+        {
+            image.Anchor = ImageAnchorKind.OneCell;
+            image.FromRow = fromRow;
+            image.FromCol = fromCol;
+            image.FromColOffset = fromColOffset;
+            image.FromRowOffset = fromRowOffset;
+        }
+        else if (position != null)
+        {
+            image.Anchor = ImageAnchorKind.Absolute;
+            image.PosX = ParseLong(position.Attribute("x")?.Value);
+            image.PosY = ParseLong(position.Attribute("y")?.Value);
+        }
+        else if (offset != null)
+        {
+            image.Anchor = ImageAnchorKind.Absolute;
+            image.PosX = ParseLong(offset.Attribute("x")?.Value);
+            image.PosY = ParseLong(offset.Attribute("y")?.Value);
+        }
+        else
+        {
+            return null;
+        }
+
+        if (extent != null)
+        {
+            image.ExtCx = ParseLong(extent.Attribute("cx")?.Value);
+            image.ExtCy = ParseLong(extent.Attribute("cy")?.Value);
+        }
+
+        if (xfrm != null)
+        {
+            image.RotationDegrees = ParseLong(xfrm.Attribute("rot")?.Value) / 60000.0;
+            image.FlipHorizontal = IsTrue(xfrm.Attribute("flipH")?.Value);
+            image.FlipVertical = IsTrue(xfrm.Attribute("flipV")?.Value);
+        }
+
+        var sourceRect = picture.Descendants(A + "srcRect").FirstOrDefault();
+        if (sourceRect != null)
+        {
+            image.CropLeft = ParseLong(sourceRect.Attribute("l")?.Value) / 100000.0;
+            image.CropTop = ParseLong(sourceRect.Attribute("t")?.Value) / 100000.0;
+            image.CropRight = ParseLong(sourceRect.Attribute("r")?.Value) / 100000.0;
+            image.CropBottom = ParseLong(sourceRect.Attribute("b")?.Value) / 100000.0;
+        }
+
+        return image;
+    }
+
+    private static bool TryReadMarker(
+        XElement? marker,
+        out int row,
+        out int col,
+        out long colOffset,
+        out long rowOffset)
+    {
+        row = 1;
+        col = 1;
+        colOffset = 0;
+        rowOffset = 0;
+
+        if (marker == null)
+        {
+            return false;
+        }
+
+        col = ParseInt(marker.Element(XDR + "col")?.Value, 0) + 1;
+        row = ParseInt(marker.Element(XDR + "row")?.Value, 0) + 1;
+        colOffset = ParseLong(marker.Element(XDR + "colOff")?.Value);
+        rowOffset = ParseLong(marker.Element(XDR + "rowOff")?.Value);
+        return row > 0 && col > 0;
     }
 
     private static void ReadConditionalFormatting(XElement root, Workbook workbook, SheetInfo sheet)
@@ -1021,6 +1226,9 @@ internal static class XlsxReader
     private static double ParseDouble(string? value, double fallback) =>
         double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var result) ? result : fallback;
 
+    private static long ParseLong(string? value) =>
+        long.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var result) ? result : 0;
+
     private static void ParseCellReference(string reference, out int row, out int col)
     {
         reference = reference.Replace("$", "");
@@ -1036,10 +1244,10 @@ internal static class XlsxReader
         int.TryParse(reference[index..], NumberStyles.Integer, CultureInfo.InvariantCulture, out row);
     }
 
-    private static Dictionary<string, string> ReadRelationships(ZipArchive zip)
+    private static Dictionary<string, RelationshipInfo> ReadRelationships(ZipArchive zip, string relationshipsPath)
     {
-        var result = new Dictionary<string, string>(StringComparer.Ordinal);
-        var entry = FindEntry(zip, "xl/_rels/workbook.xml.rels");
+        var result = new Dictionary<string, RelationshipInfo>(StringComparer.Ordinal);
+        var entry = FindEntry(zip, relationshipsPath);
         if (entry == null)
         {
             return result;
@@ -1049,14 +1257,69 @@ internal static class XlsxReader
         foreach (var relationship in doc.Root?.Elements(PR + "Relationship") ?? Enumerable.Empty<XElement>())
         {
             var id = relationship.Attribute("Id")?.Value;
-            if (!string.IsNullOrEmpty(id))
+            if (string.IsNullOrEmpty(id))
             {
-                result[id] = relationship.Attribute("Target")?.Value ?? "";
+                continue;
             }
+
+            result[id] = new RelationshipInfo(
+                id,
+                relationship.Attribute("Type")?.Value ?? "",
+                Uri.UnescapeDataString(relationship.Attribute("Target")?.Value ?? ""),
+                string.Equals(relationship.Attribute("TargetMode")?.Value, "External", StringComparison.OrdinalIgnoreCase));
         }
 
         return result;
     }
+
+    private static string GetRelationshipsPath(string partPath)
+    {
+        var slash = partPath.LastIndexOf('/');
+        if (slash < 0)
+        {
+            return "_rels/" + partPath + ".rels";
+        }
+
+        return partPath[..(slash + 1)] + "_rels/" + partPath[(slash + 1)..] + ".rels";
+    }
+
+    private static string ResolvePartPath(string basePartPath, string target)
+    {
+        if (target.StartsWith("/", StringComparison.Ordinal))
+        {
+            return target.TrimStart('/');
+        }
+
+        var slash = basePartPath.LastIndexOf('/');
+        var baseDirectory = slash >= 0 ? basePartPath[..slash] : "";
+        var combined = string.IsNullOrEmpty(baseDirectory) ? target : baseDirectory + "/" + target;
+
+        var stack = new List<string>();
+        foreach (var part in combined.Split('/'))
+        {
+            if (part.Length == 0 || part == ".")
+            {
+                continue;
+            }
+
+            if (part == "..")
+            {
+                if (stack.Count > 0)
+                {
+                    stack.RemoveAt(stack.Count - 1);
+                }
+
+                continue;
+            }
+
+            stack.Add(part);
+        }
+
+        return string.Join('/', stack);
+    }
+
+    private sealed record RelationshipInfo(string Id, string Type, string Target, bool External);
+
 
     private static string NormalizeTarget(string target)
     {

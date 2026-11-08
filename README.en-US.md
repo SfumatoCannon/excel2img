@@ -13,6 +13,8 @@ The xlsx file is parsed directly from its ZIP + XML parts and drawn with SkiaSha
 - Solid fills, cell borders (merged-cell outer borders are composed from edge cells),
   horizontal/vertical alignment, indent and text wrapping
 - Merged cells, hidden rows/columns, column widths, row heights and gridlines
+- Floating pictures (twoCellAnchor / oneCellAnchor / absoluteAnchor) with position, size,
+  rotation, flipping and cropping
 - Column widths follow the workbook's default font "maximum digit width", matching Excel's on-screen width
 - Common number formats: General, thousands separator, fixed decimals, percentage,
   currency and scientific notation
@@ -107,7 +109,8 @@ EXCEL2IMG_LANG=en-US
 ## Limitations
 
 - Only `.xlsx` is supported; legacy `.xls` is not
-- Images, charts, shapes, comments and pivot tables are not rendered
+- Charts, shapes, comments and pivot tables are not rendered. Pictures support formats decodable
+  by Skia such as PNG/JPEG/GIF/BMP; EMF/WMF/SVG and "place in cell" images (DISPIMG) are not supported
 - Only **color scales** of conditional formatting are supported; data bars, icon sets and
   formula/rule-based conditional formatting are not
 - Formulas are not recalculated; the cached values stored in the file are used

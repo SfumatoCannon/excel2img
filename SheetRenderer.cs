@@ -22,6 +22,7 @@ internal sealed class SheetRenderer : IDisposable
     private readonly Dictionary<(int Row, int Col), MergedRange> _mergeAnchors = new();
     private readonly HashSet<(int Row, int Col)> _mergedCells = new();
     private readonly Dictionary<uint, SKPaint> _fillPaints = new();
+    private readonly List<ImagePlacement> _imagePlacements = new();
     private readonly int _maxDigitWidth;
 
     private double _contentWidth;
@@ -48,6 +49,7 @@ internal sealed class SheetRenderer : IDisposable
         }
 
         BuildLayout();
+        BuildImageLayout();
     }
 
     public (int Width, int Height) RenderTo(string outputPath)
@@ -98,6 +100,8 @@ internal sealed class SheetRenderer : IDisposable
         {
             DrawSheet(canvas);
         }
+
+        DrawImages(canvas);
 
         canvas.Flush();
         return bitmap;
@@ -186,6 +190,131 @@ internal sealed class SheetRenderer : IDisposable
             }
         }
     }
+
+    private void DrawImages(SKCanvas canvas)
+    {
+        foreach (var placement in _imagePlacements)
+        {
+            SKBitmap? bitmap;
+            try
+            {
+                bitmap = SKBitmap.Decode(placement.Image.Data);
+            }
+            catch (Exception)
+            {
+                continue;
+            }
+
+            if (bitmap == null)
+            {
+                continue;
+            }
+
+            using (bitmap)
+            {
+                using var paint = new SKPaint
+                {
+                    IsAntialias = true,
+                    FilterQuality = SKFilterQuality.High,
+                };
+
+                var source = GetImageSourceRect(bitmap, placement.Image);
+                var destination = placement.Dest;
+                var image = placement.Image;
+
+                if (image.RotationDegrees % 360 != 0 || image.FlipHorizontal || image.FlipVertical)
+                {
+                    canvas.Save();
+                    canvas.Translate(destination.MidX, destination.MidY);
+                    if (image.RotationDegrees != 0)
+                    {
+                        canvas.RotateDegrees((float)image.RotationDegrees);
+                    }
+
+                    canvas.Scale(image.FlipHorizontal ? -1 : 1, image.FlipVertical ? -1 : 1);
+                    var local = SKRect.Create(
+                        -destination.Width / 2f,
+                        -destination.Height / 2f,
+                        destination.Width,
+                        destination.Height);
+                    canvas.DrawBitmap(bitmap, source, local, paint);
+                    canvas.Restore();
+                }
+                else
+                {
+                    canvas.DrawBitmap(bitmap, source, destination, paint);
+                }
+            }
+        }
+    }
+
+    private static SKRect GetImageSourceRect(SKBitmap bitmap, SheetImage image)
+    {
+        var left = Math.Clamp(image.CropLeft, 0.0, 0.99);
+        var top = Math.Clamp(image.CropTop, 0.0, 0.99);
+        var right = Math.Clamp(image.CropRight, 0.0, 0.99);
+        var bottom = Math.Clamp(image.CropBottom, 0.0, 0.99);
+
+        if (left + right >= 0.99 || top + bottom >= 0.99)
+        {
+            return new SKRect(0, 0, bitmap.Width, bitmap.Height);
+        }
+
+        return new SKRect(
+            (float)(left * bitmap.Width),
+            (float)(top * bitmap.Height),
+            (float)((1 - right) * bitmap.Width),
+            (float)((1 - bottom) * bitmap.Height));
+    }
+
+    private void BuildImageLayout()
+    {
+        const double emuPerPixel = 9525.0;
+
+        foreach (var image in _sheet.Images)
+        {
+            double left, top, right, bottom;
+            switch (image.Anchor)
+            {
+                case ImageAnchorKind.TwoCell:
+                    left = ColumnLeft(image.FromCol) + image.FromColOffset / emuPerPixel;
+                    top = RowTop(image.FromRow) + image.FromRowOffset / emuPerPixel;
+                    right = ColumnLeft(image.ToCol) + image.ToColOffset / emuPerPixel;
+                    bottom = RowTop(image.ToRow) + image.ToRowOffset / emuPerPixel;
+                    break;
+                case ImageAnchorKind.OneCell:
+                    left = ColumnLeft(image.FromCol) + image.FromColOffset / emuPerPixel;
+                    top = RowTop(image.FromRow) + image.FromRowOffset / emuPerPixel;
+                    right = left + image.ExtCx / emuPerPixel;
+                    bottom = top + image.ExtCy / emuPerPixel;
+                    break;
+                default:
+                    left = image.PosX / emuPerPixel;
+                    top = image.PosY / emuPerPixel;
+                    right = left + image.ExtCx / emuPerPixel;
+                    bottom = top + image.ExtCy / emuPerPixel;
+                    break;
+            }
+
+            if (right - left < 1 || bottom - top < 1)
+            {
+                continue;
+            }
+
+            var rect = new SKRect((float)left, (float)top, (float)right, (float)bottom);
+            _imagePlacements.Add(new ImagePlacement(image, rect));
+            _contentWidth = Math.Max(_contentWidth, right);
+            _contentHeight = Math.Max(_contentHeight, bottom);
+        }
+    }
+
+    private double ColumnLeft(int col) =>
+        col >= 0 && col < _colX.Length ? _colX[col] : 0;
+
+    private double RowTop(int row) =>
+        row >= 0 && row < _rowY.Length ? _rowY[row] : 0;
+
+    private sealed record ImagePlacement(SheetImage Image, SKRect Dest);
 
     private SKRect GetCellRect(int row, int col)
     {

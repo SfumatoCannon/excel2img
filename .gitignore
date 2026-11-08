@@ -1,0 +1,46 @@
+# ---------- .NET 构建输出 ----------
+[Bb]in/
+[Oo]bj/
+[Ll]og/
+[Ll]ogs/
+publish/
+artifacts/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# ---------- NuGet ----------
+*.nupkg
+*.snupkg
+project.lock.json
+project.fragment.lock.json
+
+# ---------- Visual Studio / Rider / VS Code ----------
+.vs/
+.idea/
+.vscode/
+*.VC.db
+*.VC.VC.opendb
+
+# ---------- 测试与覆盖率 ----------
+[Tt]est[Rr]esult*/
+*.trx
+*.coverage
+*.coveragexml
+coverage*/
+
+# ---------- 系统与编辑器临时文件 ----------
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+.DS_Store
+*.swp
+*~
+*.tmp
+*.log
+
+# ---------- 本地配置 ----------
+.env
+.env.*

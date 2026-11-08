@@ -29,12 +29,17 @@ internal static class XlsxReader
     {
         if (!File.Exists(filePath))
         {
-            throw new CliException($"找不到输入文件: {filePath}");
+            throw new CliException(Localization.F(
+                "Input file not found: {0}",
+                "找不到输入文件: {0}",
+                filePath));
         }
 
         if (!string.Equals(Path.GetExtension(filePath), ".xlsx", StringComparison.OrdinalIgnoreCase))
         {
-            throw new CliException("仅支持 .xlsx 格式的 Excel 文件。");
+            throw new CliException(Localization.T(
+                "Only .xlsx Excel files are supported.",
+                "仅支持 .xlsx 格式的 Excel 文件。"));
         }
 
         try
@@ -43,7 +48,9 @@ internal static class XlsxReader
             var workbook = new Workbook { FilePath = filePath };
 
             var workbookEntry = FindEntry(zip, "xl/workbook.xml")
-                ?? throw new CliException("无法解析文件：缺少 xl/workbook.xml，可能不是有效的 .xlsx 文件。");
+                ?? throw new CliException(Localization.T(
+                    "Cannot parse the file: xl/workbook.xml is missing; it may not be a valid .xlsx file.",
+                    "无法解析文件：缺少 xl/workbook.xml，可能不是有效的 .xlsx 文件。"));
 
             var workbookDoc = LoadXml(workbookEntry);
             var workbookPr = workbookDoc.Root?.Element(M + "workbookPr");
@@ -74,7 +81,9 @@ internal static class XlsxReader
 
             if (workbook.Sheets.Count == 0)
             {
-                throw new CliException("工作簿中没有可用的工作表。");
+                throw new CliException(Localization.T(
+                    "The workbook contains no worksheets.",
+                    "工作簿中没有可用的工作表。"));
             }
 
             ReadSharedStrings(zip, workbook);
@@ -87,11 +96,16 @@ internal static class XlsxReader
         }
         catch (InvalidDataException)
         {
-            throw new CliException("无法打开文件，文件可能已损坏或不是有效的 .xlsx 文件。");
+            throw new CliException(Localization.T(
+                "Cannot open the file; it may be corrupted or not a valid .xlsx file.",
+                "无法打开文件，文件可能已损坏或不是有效的 .xlsx 文件。"));
         }
         catch (IOException ex)
         {
-            throw new CliException($"读取文件失败: {ex.Message}");
+            throw new CliException(Localization.F(
+                "Failed to read the file: {0}",
+                "读取文件失败: {0}",
+                ex.Message));
         }
     }
 
@@ -106,7 +120,11 @@ internal static class XlsxReader
         {
             if (index < 1 || index > workbook.Sheets.Count)
             {
-                throw new CliException($"工作表序号超出范围：{index}（共 {workbook.Sheets.Count} 个工作表）。");
+                throw new CliException(Localization.F(
+                    "Sheet index out of range: {0} (the workbook has {1} worksheets).",
+                    "工作表序号超出范围：{0}（共 {1} 个工作表）。",
+                    index,
+                    workbook.Sheets.Count));
             }
 
             return workbook.Sheets[index - 1];
@@ -116,8 +134,13 @@ internal static class XlsxReader
             string.Equals(s.Name, selector, StringComparison.OrdinalIgnoreCase));
         if (matched == null)
         {
-            var names = string.Join("、", workbook.Sheets.Select(s => s.Name));
-            throw new CliException($"找不到名为 “{selector}” 的工作表。可用工作表：{names}");
+            var separator = Localization.T(", ", "、");
+            var names = string.Join(separator, workbook.Sheets.Select(s => s.Name));
+            throw new CliException(Localization.F(
+                "Worksheet \"{0}\" was not found. Available worksheets: {1}",
+                "找不到名为 “{0}” 的工作表。可用工作表：{1}",
+                selector,
+                names));
         }
 
         return matched;
@@ -368,10 +391,16 @@ internal static class XlsxReader
     private static SheetInfo ReadSheet(ZipArchive zip, Workbook workbook, SheetMeta meta)
     {
         var entry = FindEntry(zip, meta.Target)
-            ?? throw new CliException($"找不到工作表 “{meta.Name}” 的数据。");
+            ?? throw new CliException(Localization.F(
+                "Cannot find data for worksheet \"{0}\".",
+                "找不到工作表 “{0}” 的数据。",
+                meta.Name));
 
         var root = LoadXml(entry).Root
-            ?? throw new CliException($"工作表 “{meta.Name}” 的内容为空。");
+            ?? throw new CliException(Localization.F(
+                "Worksheet \"{0}\" is empty.",
+                "工作表 “{0}” 的内容为空。",
+                meta.Name));
 
         var sheet = new SheetInfo
         {

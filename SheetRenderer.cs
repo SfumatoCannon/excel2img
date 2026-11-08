@@ -58,7 +58,9 @@ internal sealed class SheetRenderer : IDisposable
         {
             ".png" => SKEncodedImageFormat.Png,
             ".jpg" or ".jpeg" => SKEncodedImageFormat.Jpeg,
-            _ => throw new CliException("输出文件扩展名必须是 .png、.jpg 或 .jpeg。"),
+            _ => throw new CliException(Localization.T(
+                "Output file extension must be .png, .jpg or .jpeg.",
+                "输出文件扩展名必须是 .png、.jpg 或 .jpeg。")),
         };
 
         var directory = Path.GetDirectoryName(Path.GetFullPath(outputPath));
@@ -69,7 +71,9 @@ internal sealed class SheetRenderer : IDisposable
 
         using var image = SKImage.FromBitmap(bitmap);
         using var data = image.Encode(format, 95)
-            ?? throw new CliException("图像编码失败。");
+            ?? throw new CliException(Localization.T(
+                "Failed to encode the image.",
+                "图像编码失败。"));
         using (var stream = File.Create(outputPath))
         {
             data.SaveTo(stream);

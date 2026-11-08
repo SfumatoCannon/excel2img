@@ -37,6 +37,8 @@ dotnet publish -c Release -o bin
 
 Output: `bin/excel2img.exe` (single file, about 40 MB).
 
+You can also run `build.bat` in the project root, which executes the command above and removes the intermediate output folder.
+
 ## Usage
 
 ```text
@@ -78,6 +80,20 @@ bin\excel2img.exe "report.xlsx" -o "report.png" --no-gridlines
 | `0` | Success |
 | `1` | Invalid arguments, missing input file, unsupported format or rendering failure |
 
+## Interface language
+
+Command-line help, messages and errors are available in English and Chinese. **English is the default.** The language is controlled by a local `.env` file in the working directory or near the executable:
+
+```ini
+# en-US (default) or zh-CN
+EXCEL2IMG_LANG=en-US
+```
+
+- Recognized key: `EXCEL2IMG_LANG` (alias: `EXCEL2IMG_LANGUAGE`)
+- `.env` lookup order: the executable's directory, then the current working directory, then up to 5 parent directories of the executable
+- Restart the command to apply changes; English is used when no `.env` is found
+- `.env` is ignored by `.gitignore` and is intended as a local setting
+
 ## Rendering notes
 
 - Images are rendered at **96 DPI**, i.e. `1 pt = 4/3 px`, matching how Excel looks at 100% zoom.
@@ -108,8 +124,11 @@ bin\excel2img.exe "report.xlsx" -o "report.png" --no-gridlines
 | `NumberFormatter.cs` | Formatting of numbers, dates, percentages and currency into display text |
 | `SheetRenderer.cs` | Layout calculation, SkiaSharp drawing and image encoding |
 | `FontResolver.cs` | Font resolution, style-word splitting and CJK glyph fallback |
+| `Localization.cs` | Interface-language loading and English/Chinese messages |
+| `.env` | Local language setting (defaults to `en-US`) |
 | `Model.cs` | Data model for workbooks, worksheets and cell styles |
 | `excel2img.csproj` | Project and publish settings (`win-x64`, single file, self-contained) |
+| `build.bat` | One-click build script |
 
 ## License
 

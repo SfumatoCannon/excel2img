@@ -33,6 +33,8 @@ dotnet publish -c Release -o bin
 
 输出：`bin/excel2img.exe`（单文件，约 40 MB）。
 
+也可以直接双击或运行项目根目录下的 `build.bat`，它会自动执行上述命令并清理中间输出目录。
+
 ## 用法
 
 ```text
@@ -74,6 +76,20 @@ bin\excel2img.exe "报表.xlsx" -o "报表.png" --no-gridlines
 | `0` | 成功 |
 | `1` | 参数错误、文件不存在、格式不支持或渲染失败 |
 
+## 界面语言
+
+命令行帮助、提示与错误信息支持英文和中文，**默认英文**。语言由当前工作目录或可执行文件附近的 `.env` 文件控制：
+
+```ini
+# en-US（默认）或 zh-CN
+EXCEL2IMG_LANG=en-US
+```
+
+- 可识别的键：`EXCEL2IMG_LANG`（别名 `EXCEL2IMG_LANGUAGE`）
+- `.env` 查找顺序：可执行文件所在目录 → 当前工作目录 → 可执行文件的上层目录（最多 5 级）
+- 修改 `.env` 后重新运行命令即可生效；找不到 `.env` 时使用英文
+- `.env` 已被 `.gitignore` 忽略，仅作为本地配置
+
 ## 渲染说明
 
 - 图片按 **96 DPI** 渲染，即 `1 磅 = 4/3 像素`，与 Excel 在 100% 缩放下的显示尺寸一致。
@@ -99,8 +115,11 @@ bin\excel2img.exe "报表.xlsx" -o "报表.png" --no-gridlines
 | `NumberFormatter.cs` | 数字、日期、百分比、货币等格式化为显示文本 |
 | `SheetRenderer.cs` | 布局计算与 SkiaSharp 绘制、图片编码输出 |
 | `FontResolver.cs` | 字体解析、样式词拆分与中文字形回退 |
+| `Localization.cs` | 界面语言加载与中英文文案 |
+| `.env` | 本地语言配置（默认 `en-US`） |
 | `Model.cs` | 工作簿、工作表、单元格样式等数据模型 |
 | `excel2img.csproj` | 项目与发布配置（`win-x64`、单文件、自包含） |
+| `build.bat` | 一键构建脚本 |
 
 ## 许可证
 
